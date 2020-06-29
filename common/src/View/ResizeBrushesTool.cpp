@@ -19,6 +19,7 @@
 
 #include "ResizeBrushesTool.h"
 
+#include "Exceptions.h"
 #include "Preferences.h"
 #include "PreferenceManager.h"
 #include "FloatType.h"
@@ -41,6 +42,8 @@
 #include <kdl/collection_utils.h>
 #include <kdl/map_utils.h>
 #include <kdl/memory_utils.h>
+#include <kdl/overload.h>
+#include <kdl/result.h>
 #include <kdl/vector_utils.h>
 
 #include <vecmath/vec.h>
@@ -437,7 +440,12 @@ namespace TrenchBroom {
                 
                 auto clipFace = newBrush.face(*newDragFaceIndex);
                 clipFace.invert();
-                newBrush.moveBoundary(worldBounds, *newDragFaceIndex, delta, lockTextures);
+                
+                const auto moveResult = newBrush.moveBoundary(worldBounds, *newDragFaceIndex, delta, lockTextures);
+                if (moveResult.is_error()) {
+                    kdl::map_clear_and_delete(newNodes);
+                    return false;
+                }
                 
                 if (!newBrush.clip(worldBounds, std::move(clipFace))) {
                     kdl::map_clear_and_delete(newNodes);

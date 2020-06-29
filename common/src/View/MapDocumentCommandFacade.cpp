@@ -643,19 +643,31 @@ namespace TrenchBroom {
         }
 
         std::vector<vm::polygon3> MapDocumentCommandFacade::performResizeBrushes(const std::vector<vm::polygon3>& polygons, const vm::vec3& delta) {
-            std::vector<vm::polygon3> result;
-
             const std::vector<Model::BrushNode*>& selectedBrushes = m_selectedNodes.brushes();
+
+            std::vector<vm::polygon3> result;
             std::vector<Model::Node*> changedNodes;
-
+            std::map<Model::BrushNode*, Model::Brush> changes;
+            
             for (Model::BrushNode* brushNode : selectedBrushes) {
-                const Model::Brush& brush = brushNode->brush();
+                Model::Brush brush = brushNode->brush();
                 if (const auto faceIndex = brush.findFace(polygons)) {
-                    if (!brush.canMoveBoundary(m_worldBounds, *faceIndex, delta)) {
-                        return result;
+                    const auto moveResult = brush.moveBoundary(m_worldBounds, *faceIndex, delta, pref(Preferences::TextureLock));
+                    const bool success = kdl::visit_result(kdl::overload {
+                        [](const bool valid) { return valid; },
+                        [&](const GeometryException& e) {
+                            error() << "Could not resize brush: " << e.what();
+                            return false;
+                        }
+                    }, moveResult);
+                    
+                    if (!success) {
+                        return {};
                     }
-
+                    
+                    result.push_back(brush.face(*faceIndex).polygon());
                     changedNodes.push_back(brushNode);
+                    changes.emplace(brushNode, std::move(brush));
                 }
             }
 
@@ -663,16 +675,9 @@ namespace TrenchBroom {
             Notifier<const std::vector<Model::Node*>&>::NotifyBeforeAndAfter notifyParents(nodesWillChangeNotifier, nodesDidChangeNotifier, parents);
             Notifier<const std::vector<Model::Node*>&>::NotifyBeforeAndAfter notifyNodes(nodesWillChangeNotifier, nodesDidChangeNotifier, changedNodes);
 
-            for (Model::BrushNode* brushNode : selectedBrushes) {
-                Model::Brush brush = brushNode->brush();
-                if (const auto faceIndex = brush.findFace(polygons)) {
-                    brush.moveBoundary(m_worldBounds, *faceIndex, delta, pref(Preferences::TextureLock));
-                    const Model::BrushFace& face = brush.face(*faceIndex);
-                    result.push_back(face.polygon());
-                    brushNode->setBrush(std::move(brush));
-                }
+            for (auto& [brushNode, brush] : changes) {
+                brushNode->setBrush(std::move(brush));
             }
-            
             invalidateSelectionBounds();
 
             return result;
